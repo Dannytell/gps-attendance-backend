@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+.pub-cache/
+.dart_tool/
+build/
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+*.swp
+
+# Secrets (IMPORTANT)
+.env
+*.pem
+
+# OS generated files
+.DS_Store
+Thumbs.db
