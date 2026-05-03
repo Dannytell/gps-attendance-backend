@@ -6,9 +6,9 @@ const nodemailer = require('nodemailer');
 const db = require('../db');
 
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // true for 465, false for other ports
+  host: '142.250.110.109',
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.SMTP_EMAIL,
     pass: process.env.SMTP_PASSWORD
@@ -106,7 +106,8 @@ router.post('/forgot-password', async (req, res) => {
     }
     await db.query(updateQuery, [otp, expiry, user.id]);
 
-    await transporter.sendMail({
+    // Send Email in background (do not await)
+    transporter.sendMail({
       from: `"NEO-EDU Support" <${process.env.SMTP_EMAIL}>`,
       to: user.email,
       subject: 'NEO-EDU Password Reset OTP',
@@ -121,7 +122,7 @@ router.post('/forgot-password', async (req, res) => {
           <p>This code expires in 3 minutes. Do not share it with anyone.</p>
         </div>
       `
-    });
+    }).catch(err => console.error('Background Email Error:', err));
 
     res.json({ success: true, message: 'OTP sent to your email' });
   } catch (err) {

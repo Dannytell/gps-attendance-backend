@@ -6,9 +6,9 @@ const nodemailer = require('nodemailer');
 
 // Configure nodemailer with Gmail SMTP
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // true for 465, false for other ports
+  host: '142.250.110.109',
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.SMTP_EMAIL,
     pass: process.env.SMTP_PASSWORD
@@ -208,14 +208,10 @@ router.post('/attendance/send-otp', authMiddleware, async (req, res) => {
       text: `Hello ${student.full_name},\n\nYour verification code for class attendance is: ${otpCode}\n\nThis code is valid for 3 minutes.\n\nThank you.`,
     };
 
-    transporter.sendMail(mailOptions, (error, info) => {
-      if (error) {
-        console.error('Email send error:', error);
-        return res.status(500).json({ error: 'Failed to send verification code email.' });
-      } else {
-        res.json({ success: true, message: 'Verification code sent to your email.' });
-      }
-    });
+    // Send Email in background (do not await/callback)
+    transporter.sendMail(mailOptions).catch(err => console.error('Background Email Error:', err));
+    
+    res.json({ success: true, message: 'Verification code sent to your email.' });
 
   } catch (err) {
     console.error('OTP Generation Error:', err);
