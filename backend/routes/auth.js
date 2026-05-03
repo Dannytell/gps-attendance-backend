@@ -8,11 +8,14 @@ const db = require('../db');
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 587,
-  secure: false, // upgrade later with STARTTLS
+  secure: false, // true for 465, false for other ports
   auth: {
     user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD,
+    pass: process.env.SMTP_PASSWORD
   },
+  tls: {
+    rejectUnauthorized: false
+  }
 });
 
 // Register Lecturer
