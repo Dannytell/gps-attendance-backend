@@ -10,9 +10,9 @@ class Environment {
   ///   the same network and can reach that IP:port.
   static String get apiBaseUrl {
     if (kIsWeb) {
-      return 'http://localhost:5000/api';
+      return 'https://gps-attendance-backend.onrender.com/api';
     }
-    // Allow overriding via dart-define: flutter run --dart-define=API_BASE_URL=...
-    return String.fromEnvironment('API_BASE_URL', defaultValue: 'http://10.0.2.2:5000/api');
+    return String.fromEnvironment('API_BASE_URL',
+      defaultValue: 'https://gps-attendance-backend.onrender.com/api');
   }
 }
