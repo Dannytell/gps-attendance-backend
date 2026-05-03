@@ -9,10 +9,13 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// Log all requests for debugging
+// Log all requests with speed timer
 app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path} - Body:`, req.body);
-  console.log('Headers:', req.headers['content-type']);
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(`${req.method} ${req.path} - ${res.statusCode} (${duration}ms)`);
+  });
   next();
 });
 

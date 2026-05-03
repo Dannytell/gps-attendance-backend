@@ -6,16 +6,19 @@ const nodemailer = require('nodemailer');
 const db = require('../db');
 
 const transporter = nodemailer.createTransport({
-  host: '142.250.110.109',
-  port: 465,
-  secure: true,
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, 
   auth: {
     user: process.env.SMTP_EMAIL,
     pass: process.env.SMTP_PASSWORD
   },
   tls: {
-    rejectUnauthorized: false
-  }
+    rejectUnauthorized: false,
+    minVersion: 'TLSv1.2'
+  },
+  connectionTimeout: 10000, // 10 seconds
+  greetingTimeout: 10000
 });
 
 // Register Lecturer
