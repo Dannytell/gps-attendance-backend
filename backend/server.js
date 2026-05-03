@@ -22,6 +22,16 @@ app.get('/', (req, res) => {
   res.send('GPS_APP API is running');
 });
 
+app.get('/debug-db', async (req, res) => {
+  const db = require('./db');
+  try {
+    const result = await db.query('SELECT NOW()');
+    res.json({ success: true, time: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message, stack: err.stack });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
