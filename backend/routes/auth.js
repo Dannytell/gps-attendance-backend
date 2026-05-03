@@ -53,6 +53,7 @@ router.post('/register/student', async (req, res) => {
 
 // Login
 router.post('/login', async (req, res) => {
+  if (!req.body) return res.status(400).json({ error: 'Missing request body' });
   const { id_number, password, role } = req.body; // role: 'lecturer' or 'student'
   try {
     let userQuery = '';
