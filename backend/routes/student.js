@@ -19,9 +19,7 @@ const sendEmail = async (to, subject, html) => {
         html: html
       })
     });
-    const data = await response.json();
-    console.log('Resend Attendance Email Response:', data);
-    return data;
+    return await response.json();
   } catch (err) {
     console.error('Resend API Error:', err);
   }
@@ -39,7 +37,7 @@ function getDistanceFromLatLonInM(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-// ... Profile Routes ...
+// Get student profile
 router.get('/profile', authMiddleware, async (req, res) => {
   try {
     const { rows } = await db.query('SELECT id, university_id, full_name, email FROM students WHERE id = $1', [req.user.id]);
@@ -47,6 +45,33 @@ router.get('/profile', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Update student profile (FIX FOR 404)
+router.put('/profile', authMiddleware, async (req, res) => {
+  const { full_name, email } = req.body;
+  try {
+    const { rows } = await db.query(
+      'UPDATE students SET full_name = COALESCE($1, full_name), email = COALESCE($2, email) WHERE id = $3 RETURNING *',
+      [full_name, email, req.user.id]
+    );
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Change Password
+router.put('/password', authMiddleware, async (req, res) => {
+  const { current_password, new_password } = req.body;
+  try {
+    const { rows } = await db.query('SELECT password_hash FROM students WHERE id = $1', [req.user.id]);
+    const bcrypt = require('bcrypt');
+    const valid = await bcrypt.compare(current_password, rows[0].password_hash);
+    if (!valid) return res.status(401).json({ error: 'Incorrect current password' });
+    const newHash = await bcrypt.hash(new_password, 10);
+    await db.query('UPDATE students SET password_hash = $1 WHERE id = $2', [newHash, req.user.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Timetable and Classes
 router.get('/timetable', authMiddleware, async (req, res) => {
   try {
     const { rows } = await db.query(
@@ -65,33 +90,21 @@ router.post('/classes/enroll', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Send OTP to Student Email
+// Send OTP
 router.post('/attendance/send-otp', authMiddleware, async (req, res) => {
   try {
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expiry = new Date(Date.now() + 3 * 60000);
-
     await db.query('UPDATE students SET otp_code = $1, otp_expiry = $2 WHERE id = $3', [otpCode, expiry, req.user.id]);
     const { rows } = await db.query('SELECT email, full_name FROM students WHERE id = $1', [req.user.id]);
     const student = rows[0];
-
-    // Log the code so user can see it in Render logs if email fails
     console.log(`ATTENDANCE OTP FOR ${student.full_name}: ${otpCode}`);
-
-    // Send via Resend (Non-blocking)
-    sendEmail(
-      student.email,
-      'Your Attendance Verification Code',
-      `<p>Hello ${student.full_name},</p><p>Your verification code is: <strong>${otpCode}</strong></p>`
-    );
-
-    res.json({ success: true, message: 'Verification code sent to your email.' });
-  } catch (err) {
-    res.status(500).json({ error: 'An error occurred while generating the code.' });
-  }
+    sendEmail(student.email, 'Your Verification Code', `<p>Code: <strong>${otpCode}</strong></p>`);
+    res.json({ success: true, message: 'OTP sent' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Sign Attendance
+// Sign Attendance (FIXED DISTANCE CHECK)
 router.post('/attendance/sign', authMiddleware, async (req, res) => {
   const { dynamic_code, latitude, longitude, verified_biometrics, otp_code } = req.body;
   try {
@@ -99,7 +112,7 @@ router.post('/attendance/sign', authMiddleware, async (req, res) => {
       const studentRes = await db.query('SELECT otp_code, otp_expiry FROM students WHERE id = $1', [req.user.id]);
       const student = studentRes.rows[0];
       if (!student.otp_code || student.otp_code !== otp_code || new Date() > new Date(student.otp_expiry)) {
-        return res.status(400).json({ error: 'Invalid or expired verification code.' });
+        return res.status(400).json({ error: 'Invalid or expired code.' });
       }
       await db.query('UPDATE students SET otp_code = NULL, otp_expiry = NULL WHERE id = $1', [req.user.id]);
     }
@@ -109,18 +122,33 @@ router.post('/attendance/sign', authMiddleware, async (req, res) => {
        FROM sessions s JOIN classes c ON s.class_id = c.id 
        WHERE s.dynamic_code = $1 AND s.is_active = TRUE`, [dynamic_code]);
 
-    if (sessionRes.rows.length === 0) return res.status(404).json({ error: 'Invalid or expired session code.' });
+    if (sessionRes.rows.length === 0) return res.status(404).json({ error: 'Invalid session code.' });
     const session = sessionRes.rows[0];
 
-    const distance = getDistanceFromLatLonInM(latitude, longitude, session.class_lat, session.class_lon);
-    if (distance > session.radius_m) {
-      return res.status(403).json({ error: `Too far from class. Distance: ${Math.round(distance)}m` });
+    // SMART DISTANCE CHECK
+    // Only check if coordinates are set (not 0,0)
+    const hasLocation = session.class_lat !== 0 || session.class_lon !== 0;
+    
+    if (hasLocation) {
+      const studentLat = parseFloat(latitude) || 0;
+      const studentLon = parseFloat(longitude) || 0;
+      
+      const distance = getDistanceFromLatLonInM(studentLat, studentLon, session.class_lat, session.class_lon);
+      
+      // Allow for GPS slippage: add a 50-meter "Grace Buffer" to the radius
+      const allowedRadius = (session.radius_m || 50) + 50; 
+      
+      if (distance > allowedRadius) {
+        return res.status(403).json({ 
+          error: `Too far from class. Your distance: ${Math.round(distance)}m. Allowed (with GPS buffer): ${Math.round(allowedRadius)}m` 
+        });
+      }
     }
 
     await db.query('INSERT INTO attendance_logs (session_id, student_id, latitude, longitude) VALUES ($1, $2, $3, $4)', 
-      [session.id, req.user.id, latitude, longitude]);
+      [session.id, req.user.id, latitude || 0, longitude || 0]);
 
-    res.json({ success: true, message: 'Attendance signed successfully!' });
+    res.json({ success: true, message: 'Attendance signed!' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
