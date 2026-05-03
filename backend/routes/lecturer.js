@@ -156,7 +156,7 @@ router.post('/session/start', authMiddleware, async (req, res) => {
     const { rows } = await db.query(
       `INSERT INTO sessions (class_id, dynamic_code, is_active, session_date, session_lat, session_lon)
        VALUES ($1, $2, TRUE, CURRENT_DATE, $3, $4) RETURNING *`,
-      [class_id, dynamic_code, session_lat || 0, session_lon || 0]
+      [class_id, dynamic_code, session_lat, session_lon]
     );
 
     const session = rows[0];

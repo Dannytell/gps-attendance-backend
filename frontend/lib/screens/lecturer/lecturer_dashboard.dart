@@ -403,8 +403,8 @@ class _LecturerHomeState extends State<_LecturerHome> {
             ),
             TextButton(
               onPressed: () {
-                pickedLat = 0;
-                pickedLon = 0;
+                pickedLat = null;
+                pickedLon = null;
                 Navigator.pop(ctx, true);
               },
               child: const Text('SKIP', style: TextStyle(color: Colors.white54)),

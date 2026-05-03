@@ -45,7 +45,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Update student profile (FIX FOR 404)
+// Update student profile
 router.put('/profile', authMiddleware, async (req, res) => {
   const { full_name, email } = req.body;
   try {
@@ -104,7 +104,7 @@ router.post('/attendance/send-otp', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Sign Attendance (FIXED DISTANCE CHECK)
+// Sign Attendance (SMART GEOFENCING)
 router.post('/attendance/sign', authMiddleware, async (req, res) => {
   const { dynamic_code, latitude, longitude, verified_biometrics, otp_code } = req.body;
   try {
@@ -125,22 +125,21 @@ router.post('/attendance/sign', authMiddleware, async (req, res) => {
     if (sessionRes.rows.length === 0) return res.status(404).json({ error: 'Invalid session code.' });
     const session = sessionRes.rows[0];
 
-    // SMART DISTANCE CHECK
-    // Only check if coordinates are set (not 0,0)
-    const hasLocation = session.class_lat !== 0 || session.class_lon !== 0;
-    
-    if (hasLocation) {
+    // DECIDE WHICH COORDINATES TO USE (Priority: Session > Class)
+    let refLat = (session.session_lat && Math.abs(session.session_lat) > 0.001) ? session.session_lat : session.class_lat;
+    let refLon = (session.session_lon && Math.abs(session.session_lon) > 0.001) ? session.session_lon : session.class_lon;
+
+    // ONLY CHECK IF COORDINATES ARE REAL (Not 0,0)
+    if (Math.abs(refLat) > 0.001 || Math.abs(refLon) > 0.001) {
       const studentLat = parseFloat(latitude) || 0;
       const studentLon = parseFloat(longitude) || 0;
       
-      const distance = getDistanceFromLatLonInM(studentLat, studentLon, session.class_lat, session.class_lon);
-      
-      // Allow for GPS slippage: add a 50-meter "Grace Buffer" to the radius
-      const allowedRadius = (session.radius_m || 50) + 50; 
-      
+      const distance = getDistanceFromLatLonInM(studentLat, studentLon, refLat, refLon);
+      const allowedRadius = (session.radius_m || 50) + 50; // 50m radius + 50m GPS buffer
+
       if (distance > allowedRadius) {
         return res.status(403).json({ 
-          error: `Too far from class. Your distance: ${Math.round(distance)}m. Allowed (with GPS buffer): ${Math.round(allowedRadius)}m` 
+          error: `Too far from class. Distance: ${Math.round(distance)}m. Allowed: ${Math.round(allowedRadius)}m` 
         });
       }
     }
