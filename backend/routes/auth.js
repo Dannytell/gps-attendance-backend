@@ -2,24 +2,31 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
 const db = require('../db');
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, 
-  auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD
-  },
-  tls: {
-    rejectUnauthorized: false,
-    minVersion: 'TLSv1.2'
-  },
-  connectionTimeout: 10000, // 10 seconds
-  greetingTimeout: 10000
-});
+// Resend Email Helper
+const sendEmail = async (to, subject, html) => {
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: 'NEO-EDU <onboarding@resend.dev>',
+        to: to,
+        subject: subject,
+        html: html
+      })
+    });
+    const data = await response.json();
+    console.log('Resend API Response:', data);
+    return data;
+  } catch (err) {
+    console.error('Resend API Error:', err);
+  }
+};
 
 // Register Lecturer
 router.post('/register/lecturer', async (req, res) => {
@@ -45,9 +52,6 @@ router.post('/register/student', async (req, res) => {
       'INSERT INTO students (university_id, full_name, email, password_hash) VALUES ($1, $2, $3, $4) RETURNING id, university_id, full_name',
       [university_id, full_name, email, hashedPassword]
     );
-
-    const newStudentId = result.rows[0].id;
-
     res.status(201).json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -57,7 +61,7 @@ router.post('/register/student', async (req, res) => {
 // Login
 router.post('/login', async (req, res) => {
   if (!req.body) return res.status(400).json({ error: 'Missing request body' });
-  const { id_number, password, role } = req.body; // role: 'lecturer' or 'student'
+  const { id_number, password, role } = req.body;
   try {
     let userQuery = '';
     if (role === 'lecturer') {
@@ -96,10 +100,8 @@ router.post('/forgot-password', async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
 
     const user = rows[0];
-    if (!user.email) return res.status(400).json({ error: 'No email associated with this account' });
-
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiry = new Date(Date.now() + 3 * 60000); // 3 mins
+    const expiry = new Date(Date.now() + 3 * 60000);
 
     let updateQuery = '';
     if (role === 'lecturer') {
@@ -109,27 +111,18 @@ router.post('/forgot-password', async (req, res) => {
     }
     await db.query(updateQuery, [otp, expiry, user.id]);
 
-    // Send Email in background (do not await)
-    transporter.sendMail({
-      from: `"NEO-EDU Support" <${process.env.SMTP_EMAIL}>`,
-      to: user.email,
-      subject: 'NEO-EDU Password Reset OTP',
-      text: `Your password reset code is: ${otp}. It will expire in 3 minutes.`,
-      html: `
-        <div style="font-family: sans-serif; background-color: #1A1C29; color: white; padding: 30px; border-radius: 10px;">
-          <h2 style="color: #00F0FF; margin-top: 0;">PASSWORD RESET</h2>
-          <p>We received a request to reset your NEO-EDU password.</p>
-          <div style="background-color: rgba(255, 0, 60, 0.1); border: 1px solid #FF003C; padding: 15px; text-align: center; font-size: 24px; letter-spacing: 5px; margin: 20px 0;">
-            <strong>${otp}</strong>
-          </div>
-          <p>This code expires in 3 minutes. Do not share it with anyone.</p>
-        </div>
-      `
-    }).catch(err => console.error('Background Email Error:', err));
+    // Send via Resend (No port needed, works on port 443)
+    sendEmail(
+      user.email,
+      'NEO-EDU Password Reset OTP',
+      `<div style="font-family: sans-serif; background-color: #1A1C29; color: white; padding: 30px; border-radius: 10px;">
+        <h2 style="color: #00F0FF; margin-top: 0;">PASSWORD RESET</h2>
+        <p>Your password reset code is: <strong>${otp}</strong></p>
+      </div>`
+    );
 
     res.json({ success: true, message: 'OTP sent to your email' });
   } catch (err) {
-    console.error('FORGOT PWD ERROR:', err);
     res.status(500).json({ error: 'Failed to process request' });
   }
 });
@@ -144,7 +137,6 @@ router.post('/reset-password', async (req, res) => {
     } else {
       userQuery = 'SELECT * FROM students WHERE UPPER(university_id) = UPPER($1)';
     }
-
     const { rows } = await db.query(userQuery, [id_number]);
     if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
     const user = rows[0];
@@ -154,17 +146,13 @@ router.post('/reset-password', async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(new_password, 10);
-    let updateQuery = '';
-    if (role === 'lecturer') {
-      updateQuery = 'UPDATE lecturers SET password_hash = $1, otp_code = NULL, otp_expiry = NULL WHERE id = $2';
-    } else {
-      updateQuery = 'UPDATE students SET password_hash = $1, otp_code = NULL, otp_expiry = NULL WHERE id = $2';
-    }
+    let updateQuery = role === 'lecturer' ? 
+      'UPDATE lecturers SET password_hash = $1, otp_code = NULL, otp_expiry = NULL WHERE id = $2' :
+      'UPDATE students SET password_hash = $1, otp_code = NULL, otp_expiry = NULL WHERE id = $2';
+    
     await db.query(updateQuery, [hashedPassword, user.id]);
-
     res.json({ success: true, message: 'Password reset successful' });
   } catch (err) {
-    console.error('RESET PWD ERROR:', err);
     res.status(500).json({ error: 'Failed to reset password' });
   }
 });
